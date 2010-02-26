@@ -244,8 +244,8 @@
     (cdr exp))
 
   (defun eval-sequence (actions env)
-    (dolist (action actions)
-      (slisp-eval action env)))
+    (dolist (action actions value)
+      (setq value (slisp-eval action env))))
 
   (defun calc (exp env)
     (let ((op (car exp))
