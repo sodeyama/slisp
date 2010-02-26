@@ -3,6 +3,8 @@
 (setq max-specpdl-size 1024)
 (setq max-lisp-eval-depth 1024)
 
+(setq slisp-filename "mylisp.l")
+
 (setq type_list '("(" ")"))
 (setq start_paren "(")
 (setq end_paren ")")
@@ -296,5 +298,5 @@
         (t (error "Unknown expression type. " exp))))
 
 (slisp-clear-messages)
-(slisp-eval (slisp-parse (slisp-get-tokens (slisp-get-src-string "mylisp.el"))) environment)
+(slisp-eval (slisp-parse (slisp-get-tokens (slisp-get-src-string slisp-filename))) environment)
 
