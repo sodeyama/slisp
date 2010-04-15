@@ -445,7 +445,7 @@
       (cond ((lambda? check_exp)
              (progn
                (setq check_exp (cddr exp))
-               (let ((func-args (cdr check_exp)))
+               (let ((func-args (cadr exp)))
                  (dolist (arg func-args)
                    (if (and (not (listp arg))
                             (equal (symbol-name arg) key))
@@ -453,7 +453,7 @@
             ((let? check_exp)
              (progn
                (setq check_exp (cddr exp))
-               (let ((func-args (cdr check_exp)))
+               (let ((func-args (cadr exp)))
                  (dolist (arg func-args)
                    (if (and (not (listp arg))
                             (equal (symbol-name arg) key))
