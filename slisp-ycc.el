@@ -22,27 +22,28 @@
 
 (require 'cl)
 
-(setq max-specpdl-size 16384)
-(setq max-lisp-eval-depth 9192)
+(setq max-specpdl-size 4096)
+(setq max-lisp-eval-depth 4096)
 
-(setq slisp-filename "mylisp.l")
+(setq slisp-filename "sample.sl")
 
-(setq type_list '("(" ")"))
-(setq start_paren "(")
-(setq end_paren ")")
-(setq double_quote "\"")
-(setq ignore_list '("\t" "\r" "\n" " "))
+(setq slisp-type-list '("(" ")"))
+(setq slisp-start-paren "(")
+(setq slisp-end-paren ")")
+(setq slisp-double-quote "\"")
+(setq slisp-ignore-list '("\t" "\r" "\n" " "))
 
-(setq primitive-list
+(setq slisp-primitive-list
       '("list" "setq" "let" "defun"
         "if" "cond" "lambda" "apply"
         "top-progn" "progn" "quote" "print"
         "+" "-" "*" "/" "=" ">" "<"
         "not" "or" "and"
         "call/cc" "throw"))
-(setq sequence-top-symbol "top-progn")
+(setq slisp-sequence-top-symbol "top-progn")
+(setq slisp-callcc-symbol "call/cc")
 
-(setq environment (make-hash-table :test #'equal))
+(setq slisp-environment (make-hash-table :test #'equal))
 
 
 (defun gethash-keys (hash)
@@ -65,12 +66,25 @@
   (loop for y in list
         thereis (equal x y)))
 
+(defmacro with-gensyms (syms &rest body)
+  (declare (indent 1))
+  `(let ,(mapcar
+          (lambda (sym)
+            `(,sym (gensym)))
+          syms)
+     ,@body))
+
 (defun slisp-get-src-string (filename)
-  (let ((pre-buffer (current-buffer)))
+  (let ((pre-buffer (current-buffer))
+        (ret ""))
     (find-file filename)
     (setq str (buffer-substring-no-properties (point-min) (point-max)))
+    (let ((lines (split-string str "\n")))
+      (dolist (line lines)
+        (if (not (string-match "^;" line))
+            (setq ret (concat ret line)))))
     (switch-to-buffer pre-buffer)
-    str))
+    ret))
 
 (defmacro slisp-set-tokenbuf-and-clear (buf tokens)
   `(if (not (equal ,buf ""))
@@ -84,35 +98,36 @@
         (tokens nil)
         (in_double_quote nil))
     (dolist (c chars)
-      (if (equal c double_quote)
+      (if (equal c slisp-double-quote)
           (if in_double_quote
               (setq in_double_quote nil)
             (setq in_double_quote t)))
-      (cond ((slisp-contains c type_list)
+      (cond ((slisp-contains c slisp-type-list)
              (progn
                (slisp-set-tokenbuf-and-clear token_buf tokens)
                (push c tokens)))
-            ((and (not in_double_quote) (slisp-contains c ignore_list))
+            ((and (not in_double_quote) (slisp-contains c slisp-ignore-list))
              (slisp-set-tokenbuf-and-clear token_buf tokens))
             (t
              (setq token_buf (concat token_buf c)))))
     (nreverse tokens)))
 
 (defun slisp-check-primitive (token)
-  (slisp-contains token primitive-list))
+  (slisp-contains token slisp-primitive-list))
 
 (defun slisp-check-type (token type)
   (cond ((equal type "string") (string-match "^\"\\(.+\\)\"$" token))
         ((equal type "number") (string-match "^\\([0-9]+\\)$" token))
         ((equal type "symbol") (string-match "\\\w+" token))
+        ((equal type "boolean") (string-match "^\\(t\\|nil\\)$" token))
         ((equal type "quote") (string-match "\'.+" token))))
 
 (defun slisp-parse (tokens)
   (let ((stack '()))
     (dolist (token tokens)
-      (cond ((equal token start_paren)
+      (cond ((equal token slisp-start-paren)
              (push '() stack))
-            ((equal token end_paren)
+            ((equal token slisp-end-paren)
              (let* ((cur_stack (pop stack))
                     (up_stack (pop stack)))
                (push
@@ -120,6 +135,13 @@
                 stack)))
             ((slisp-check-primitive token)
              (push (cons token (pop stack)) stack))
+            ((slisp-check-type token "boolean")
+             (let ((bool))
+               (cond ((equal token "t")
+                      (setq bool t))
+                     ((equal token "nil")
+                      (setq bool nil)))
+               (push (cons bool (pop stack)) stack)))
             ((slisp-check-type token "string")
              (push (cons (match-string 1 token) (pop stack)) stack))
             ((slisp-check-type token "number")
@@ -129,36 +151,37 @@
             (t
              (push (cons token (pop stack)) stack))))
     (let ((cur (pop stack)))
-      (cons sequence-top-symbol (nreverse cur)))))
+      (cons slisp-sequence-top-symbol (nreverse cur)))))
 
 (defun slisp-callcc-parse (exp env)
-  (catch 'exit
-    (dolist (seed (cdr exp))
-      (let* ((ret (slisp-callcc-getcc seed env))
-             (find (slisp-get-findcallcc ret))
-             (cc (slisp-get-callcc ret)))
-        (if find
-            (progn
-              (let ((sexp (list "lambda" (list (make-symbol "variable-for-callcc")) (list "throw" cc))))
-                (puthash "callcc" (slisp-eval sexp env) env))
-              (throw 'exit t)))))))
+  (with-gensyms (variable)
+    (catch 'exit
+      (dolist (seed (cdr exp))
+        (let* ((ret (slisp-callcc-getcc seed variable env))
+               (find (slisp-get-findcallcc ret))
+               (cc (slisp-get-callcc ret)))
+          (if find
+              (progn
+                (let ((sexp (list "lambda" (list variable) (list "throw" cc))))
+                  (puthash "callcc" (slisp-eval sexp env) env))
+                (throw 'exit t))))))))
 
-(defun slisp-callcc-getcc (exp env)
+(defun slisp-callcc-getcc (exp variable env)
   (catch 'exit
     (let ((cc '())
           (find_callcc nil))
       (dolist (i exp)
         (if (listp i)
-            (let ((find (slisp-get-findcallcc (slisp-callcc-getcc i env)))
-                  (ret (slisp-get-callcc (slisp-callcc-getcc i env))))
+            (let ((find (slisp-get-findcallcc (slisp-callcc-getcc i variable env)))
+                  (ret (slisp-get-callcc (slisp-callcc-getcc i variable env))))
               (setq find_callcc find)
               (setq cc (slisp-callcc-setlist ret cc))
               (if (and (symbolp ret)
-                       (equal (symbol-name ret) "variable-for-callcc"))
+                       (equal (symbol-name ret) (symbol-name variable)))
                   (setq find_callcc t)))
           (if (and (stringp i)
-                   (equal i "call/cc"))
-              (throw 'exit (list t (make-symbol "variable-for-callcc")))
+                   (equal i slisp-callcc-symbol))
+              (throw 'exit (list t variable))
             (setq cc (slisp-callcc-setlist i cc)))))
       (if (listp cc)
           (list find_callcc (nreverse cc))
@@ -200,10 +223,14 @@
     (stringp exp))
   (defun symbol? (exp)
     (symbolp exp))
+  (defun boolean? (exp)
+    (and (string? exp)
+         (or (equal exp "t")
+             (equal exp "nil"))))
   (defun self? (exp)
-    (cond ((number? exp) t)
-          ((string? exp) t)
-          ((booleanp exp) t)))
+    (cond ((booleanp exp) t)
+          ((number? exp) t)
+          ((string? exp) t)))
   (defun variable? (exp)
     (symbolp exp))
 
@@ -420,6 +447,12 @@
             (t
              (message "%s" mes)))))
 
+  (defun eval-boolean (exp)
+    (cond ((equal exp "t") t)
+          ((equal exp "nil" nil))
+          (t 
+           (error "eval-boolean not match:%s" exp))))
+
   (defun lookup-variable-value (exp env)
     (let* ((symbolname (symbol-name exp)))
       (gethash symbolname env)))
@@ -433,7 +466,7 @@
   (defun set-assignment (exp env)
     (let ((variable (cadr exp))  
           (value (slisp-eval (caddr exp) (copy-hash-table env))))
-      (puthash (symbol-name variable) value environment)))
+      (puthash (symbol-name variable) value slisp-environment)))
 
   (defun list-of-values (exp env)
     exp)
@@ -531,7 +564,17 @@
          (eval-apply exp env))
         (t (error "Unknown expression type. " exp))))
 
-(slisp-clear-messages)
-(let ((tree (slisp-parse (slisp-get-tokens (slisp-get-src-string slisp-filename)))))
-  (slisp-callcc-parse tree environment)
-  (slisp-eval tree environment))
+(defun slisp-e ()
+  (interactive)
+  (slisp-clear-messages)
+  (let ((tree (slisp-parse (slisp-get-tokens (slisp-get-src-string slisp-filename)))))
+    (slisp-callcc-parse tree slisp-environment)
+    (slisp-eval tree slisp-environment)))
+
+(defun slisp-mode ()
+  (interactive)
+  (setq major-mode 'slisp-mode
+    mode-name "slisp mode")
+  (setq beta-local-map (make-keymap))
+  (define-key beta-local-map "\C-cn" 'slisp-e)
+  (use-local-map beta-local-map))

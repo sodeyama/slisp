@@ -1,0 +1,32 @@
+What is this?
+=============
+
+The sLisp is a lisp interpreter written by emacs lisp.
+
+
+Features
+========
+
+* Dynamic scope
+* You can write the Y Combinator.
+* You can write the Current Continuation.
+
+
+How to
+======
+
+At first, load the slisp-ycc.el like following.
+
+(load "~/git/slisp/slisp-ycc.el")
+
+And see the sample.sl.
+The sample.sl is a sLisp code.
+You can write the code like that.
+
+Open the code you wrote on emacs.
+Do "M-x slisp-mode" on the buffer you opened.
+
+Do "C-c n", you can evaluate the slisp code.
+
+
+You can see the result on *Message* buffer.
