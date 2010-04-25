@@ -65,3 +65,15 @@
 (print "ending..")
 (print (hoge 5))
 (print (hoge 6))
+
+
+;; Current containuation sample2
+(print "starting call/cc sample2")
+(let ((a 3))
+  (print (* a
+            (call/cc (lambda(cc)
+                       (progn
+                         (setq hoge2 cc)
+                         (cc 3)))))))
+(print "ending..")
+(print (hoge2 4))

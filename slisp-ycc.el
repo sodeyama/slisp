@@ -42,6 +42,7 @@
         "call/cc" "throw"))
 (setq slisp-sequence-top-symbol "top-progn")
 (setq slisp-callcc-symbol "call/cc")
+(setq slisp-callcc-fifo nil)
 
 (setq slisp-environment (make-hash-table :test #'equal))
 
@@ -154,17 +155,15 @@
       (cons slisp-sequence-top-symbol (nreverse cur)))))
 
 (defun slisp-callcc-parse (exp env)
-  (with-gensyms (variable)
-    (catch 'exit
-      (dolist (seed (cdr exp))
-        (let* ((ret (slisp-callcc-getcc seed variable env))
-               (find (slisp-get-findcallcc ret))
-               (cc (slisp-get-callcc ret)))
-          (if find
-              (progn
-                (let ((sexp (list "lambda" (list variable) (list "throw" cc))))
-                  (puthash "callcc" (slisp-eval sexp env) env))
-                (throw 'exit t))))))))
+  (dolist (seed (cdr exp))
+    (with-gensyms (variable)
+      (let* ((ret (slisp-callcc-getcc seed variable env))
+             (find (slisp-get-findcallcc ret))
+             (cc (slisp-get-callcc ret)))
+        (if find
+            (progn
+              (let ((sexp (list "lambda" (list variable) (list "throw" cc))))
+                (setq slisp-callcc-fifo (append slisp-callcc-fifo (list sexp))))))))))
 
 (defun slisp-callcc-getcc (exp variable env)
   (catch 'exit
@@ -197,6 +196,11 @@
   (if (eq l nil)
       (list exp)
     (cons exp l)))
+
+(defun slisp-get-and-set-callcc ()
+  (let ((ret (car slisp-callcc-fifo)))
+    (setq slisp-callcc-fifo (cdr slisp-callcc-fifo))
+    ret))
 
 (defmacro slisp-make-primitive? (exp operator)
   `(cond ((listp ,exp)
@@ -365,7 +369,9 @@
     (let* ((body (cadr exp))
            (lambda-arg (car (cadr body)))
            (lambda-body (caddr body)))
-      (puthash (symbol-name lambda-arg) (gethash "callcc" env) env)
+      (puthash (symbol-name lambda-arg) 
+               (slisp-get-and-set-callcc)
+               env)
       (slisp-eval lambda-body env)))
 
   (defun eval-if (exp env)
@@ -573,6 +579,7 @@
 
 (defun slisp-mode ()
   (interactive)
+  (lisp-mode)
   (setq major-mode 'slisp-mode
     mode-name "slisp mode")
   (setq beta-local-map (make-keymap))
