@@ -163,7 +163,7 @@
         (if find
             (progn
               (let ((sexp (list "lambda" (list variable) (list "throw" cc))))
-                (setq slisp-callcc-fifo (append slisp-callcc-fifo (list sexp))))))))))
+                (slisp-callcc-fifo-set sexp))))))))
 
 (defun slisp-callcc-getcc (exp variable env)
   (catch 'exit
@@ -197,7 +197,10 @@
       (list exp)
     (cons exp l)))
 
-(defun slisp-get-and-set-callcc ()
+(defun slisp-callcc-fifo-set (exp)
+  (setq slisp-callcc-fifo (append slisp-callcc-fifo (list exp))))
+
+(defun slisp-callcc-fifo-get ()
   (let ((ret (car slisp-callcc-fifo)))
     (setq slisp-callcc-fifo (cdr slisp-callcc-fifo))
     ret))
@@ -370,7 +373,7 @@
            (lambda-arg (car (cadr body)))
            (lambda-body (caddr body)))
       (puthash (symbol-name lambda-arg) 
-               (slisp-get-and-set-callcc)
+               (slisp-callcc-fifo-get)
                env)
       (slisp-eval lambda-body env)))
 
